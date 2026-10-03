@@ -1,0 +1,98 @@
+//@version=6
+// C kurali — Londra 13:00 H1 mumu (MT5 kurum 15:00, TR yaz 15:00 / kis 16:00)
+// son 20 is gununun ayni saat mumlarinin ortanca boyundan kucuk/esitse mumun TERSINE giris.
+// Giris: sinyal mumu kapanisi. SL 30 pip, TP 30 pip, en gec 3 mum sonra kapanisla cikis.
+// Test (2026-10-03 Yasin Oturum 5): 5 yil +1,90 net pip/islem, 2026 Oca-Eyl +1,86 (maliyet 0,7 pip).
+strategy("C Kurali - 13:00 Londra kucuk mum fade", overlay = true,
+     process_orders_on_close = true, calc_on_every_tick = false,
+     initial_capital = 10000, currency = currency.USD,
+     default_qty_type = strategy.fixed, default_qty_value = 10000,
+     commission_type = strategy.commission.percent, commission_value = 0.003)
+
+saatLon  = input.int(13, "Sinyal mumu saati (Londra)", tooltip = "Londra 13:00 = MT5 kurum 15:00 = TR yaz 15:00 / kis 16:00")
+gun      = input.int(20, "Ortanca icin gun sayisi", minval = 5)
+slPip    = input.float(30, "SL (pip)")
+tpPip    = input.float(30, "TP (pip)")
+tutus    = input.int(3, "En gec kac mum sonra cikis", minval = 1)
+maliyet  = input.float(0.7, "Tablo icin maliyet (pip/islem)")
+bas      = input.time(timestamp("2020-09-21T00:00:00"), "Baslangic")
+bit      = input.time(timestamp("2099-01-01T00:00:00"), "Bitis")
+
+if timeframe.period != "60"
+    runtime.error("C Kurali sadece 1 saatlik (H1) grafikte calisir.")
+
+pip = syminfo.mintick < 0.001 ? 0.0001 : 0.01
+
+// --- Sinyal mumu: Londra saatine gore, hafta ici, mum kapanmis
+lh       = hour(time, "Europe/London")
+ldow     = dayofweek(time, "Europe/London")
+haftaIci = ldow >= dayofweek.monday and ldow <= dayofweek.friday
+sinyalMumu = barstate.isconfirmed and lh == saatLon and haftaIci
+
+var array<float> boylar = array.new<float>()
+boy = (high - low) / pip
+float ortanca = na
+bool kucuk = false
+if sinyalMumu
+    n = array.size(boylar)
+    if n >= gun
+        ortanca := array.median(array.slice(boylar, n - gun, n))
+        kucuk := boy <= ortanca
+    array.push(boylar, boy)
+    if array.size(boylar) > 500
+        array.shift(boylar)
+
+// yesil mum -> SAT (-1), kirmizi mum -> AL (+1), doji -> yok
+yon = kucuk and close != open ? (close > open ? -1 : 1) : 0
+tarihte = time >= bas and time <= bit
+
+// --- Islemler
+var int girisBar = na
+if yon != 0 and tarihte and strategy.position_size == 0
+    if yon > 0
+        strategy.entry("C AL", strategy.long)
+        strategy.exit("C AL cikis", "C AL", stop = close - slPip * pip, limit = close + tpPip * pip)
+    else
+        strategy.entry("C SAT", strategy.short)
+        strategy.exit("C SAT cikis", "C SAT", stop = close + slPip * pip, limit = close - tpPip * pip)
+    girisBar := bar_index
+    alert(str.format("C kurali {0}: {1} @ {2} | SL {3} | TP {4} | en gec {5} mum sonra kapat",
+         syminfo.ticker, yon > 0 ? "AL" : "SAT", close,
+         close - yon * slPip * pip, close + yon * tpPip * pip, tutus), alert.freq_once_per_bar_close)
+
+if strategy.position_size != 0 and not na(girisBar) and bar_index - girisBar >= tutus
+    strategy.close_all(comment = "sure")
+
+// --- Pip istatistigi (MT5/Python testiyle ayni olcu: net pip/islem)
+var float topPip = 0.0
+var int nIs = 0
+var int kaz = 0
+var int sonKapanan = 0
+if strategy.closedtrades > sonKapanan
+    for k = sonKapanan to strategy.closedtrades - 1
+        e = strategy.closedtrades.entry_price(k)
+        x = strategy.closedtrades.exit_price(k)
+        s = strategy.closedtrades.size(k)
+        p = (x - e) / pip * math.sign(s) - maliyet
+        topPip += p
+        nIs += 1
+        kaz += p > 0 ? 1 : 0
+    sonKapanan := strategy.closedtrades
+
+// --- Gorsel
+plotshape(yon > 0, "C AL", shape.triangleup, location.belowbar, color.new(color.blue, 0), size = size.small)
+plotshape(yon < 0, "C SAT", shape.triangledown, location.abovebar, color.new(color.orange, 0), size = size.small)
+plotshape(sinyalMumu and not kucuk and not na(ortanca), "Buyuk mum (islem yok)", shape.xcross, location.abovebar, color.new(color.gray, 40), size = size.tiny)
+
+var table tb = table.new(position.top_right, 2, 5, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    table.cell(tb, 0, 0, "C Kurali", text_color = color.white)
+    table.cell(tb, 1, 0, str.format("SL {0} / TP {1} / {2} mum", slPip, tpPip, tutus), text_color = color.white)
+    table.cell(tb, 0, 1, "Islem", text_color = color.white)
+    table.cell(tb, 1, 1, str.tostring(nIs), text_color = color.white)
+    table.cell(tb, 0, 2, "Net ort (pip)", text_color = color.white)
+    table.cell(tb, 1, 2, nIs > 0 ? str.tostring(topPip / nIs, "#.##") : "-", text_color = color.white)
+    table.cell(tb, 0, 3, "Kazanan", text_color = color.white)
+    table.cell(tb, 1, 3, nIs > 0 ? str.tostring(100.0 * kaz / nIs, "#") + "%" : "-", text_color = color.white)
+    table.cell(tb, 0, 4, "Referans", text_color = color.gray)
+    table.cell(tb, 1, 4, "5y +1,90 | 2026 +1,86", text_color = color.gray)
