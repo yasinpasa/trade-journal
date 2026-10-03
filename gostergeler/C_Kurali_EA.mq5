@@ -26,6 +26,7 @@ input bool   Sali             = true;
 input bool   Carsamba         = true;
 input bool   Persembe         = true;
 input bool   Cuma             = true;
+input double MaliyetLotBasi   = 7.0;     // SADECE TESTTE: lot basi gidis-donus maliyet $ (komisyon+spread, FTMO ~7)
 input bool   GercekHesaptaCalis = false; // false: gercek hesapta islem acmaz (sadece demo/test)
 input long   Sihirli          = 20261003;// Magic number
 
@@ -33,6 +34,8 @@ CTrade   trade;
 datetime sonBar = 0;
 datetime girisBarZamani = 0;
 double   pip;
+double   topMaliyet = 0;
+int      islemSay = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -43,6 +46,14 @@ int OnInit()
    if(!GercekHesaptaCalis && AccountInfoInteger(ACCOUNT_TRADE_MODE) == ACCOUNT_TRADE_MODE_REAL)
       Print("C_Kurali_EA: GERCEK hesap. GercekHesaptaCalis=false oldugu icin islem acilmayacak.");
    return(INIT_SUCCEEDED);
+  }
+
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+  {
+   if(MQLInfoInteger(MQL_TESTER))
+      PrintFormat("C_Kurali_EA OZET: %d islem | toplam maliyet %.2f $ | maliyet sonrasi bakiye %.2f $",
+                  islemSay, topMaliyet, AccountInfoDouble(ACCOUNT_BALANCE));
   }
 
 //+------------------------------------------------------------------+
@@ -176,7 +187,17 @@ void OnTick()
                       NormalizeDouble(bid - TP_pip * pip, _Digits), "C SAT");
      }
    if(ok)
+     {
       girisBarZamani = t0;
+      islemSay++;
+      // MT5 testinde komisyon alani yok: maliyeti bakiyeden cekerek uygula (sadece Strateji Test Araci)
+      if(MQLInfoInteger(MQL_TESTER) && MaliyetLotBasi > 0)
+        {
+         double m = NormalizeDouble(lot * MaliyetLotBasi, 2);
+         if(m > 0 && TesterWithdrawal(m))
+            topMaliyet += m;
+        }
+     }
    PrintFormat("C_Kurali_EA %s: mum %.1f pip, ortanca %.1f pip -> %s %.2f lot %s",
                TimeToString(r[0].time), boy, med, (al ? "AL" : "SAT"), lot, (ok ? "acildi" : "HATA"));
   }
