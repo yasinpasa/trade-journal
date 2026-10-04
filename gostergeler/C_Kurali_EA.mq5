@@ -8,7 +8,7 @@
 //| Test (2026-10-03 Oturum 5/6): C 5 yil +1,90 net; her gun +0,59.   |
 //+------------------------------------------------------------------+
 #property copyright   "Yasin"
-#property version     "1.00"
+#property version     "1.20"
 #property description "C kurali: 15:00 mumu kucukse tersine. SL30 / TP30 / 3 saat."
 
 #include <Trade\Trade.mqh>
@@ -21,6 +21,8 @@ input double TP_pip           = 30;      // Hedef (pip)
 input int    TutusMum         = 3;       // En gec kac mum sonra kapat
 input double RiskYuzde        = 0.5;     // Islem basi risk (% bakiye). 0 ise SabitLot
 input double SabitLot         = 0.10;    // RiskYuzde=0 iken lot
+input double TakipMesafe      = 0;       // Takip eden stop mesafesi (pip). 0 = kapali
+input double TakipBaslat      = 0;       // Takip, kar bu kadar pip olunca baslar (0 = hemen)
 input bool   Pazartesi        = true;
 input bool   Sali             = true;
 input bool   Carsamba         = true;
@@ -111,8 +113,42 @@ double LotHesapla()
   }
 
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Takip eden stop: her tikte, stop sadece lehe tasinir              |
+//+------------------------------------------------------------------+
+void TakipEt()
+  {
+   if(TakipMesafe <= 0)
+      return;
+   ulong tk = BenimPozisyon();
+   if(tk == 0 || !PositionSelectByTicket(tk))
+      return;
+   long   tip  = PositionGetInteger(POSITION_TYPE);
+   double acil = PositionGetDouble(POSITION_PRICE_OPEN);
+   double sl   = PositionGetDouble(POSITION_SL);
+   double tp   = PositionGetDouble(POSITION_TP);
+   if(tip == POSITION_TYPE_BUY)
+     {
+      double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      if((bid - acil) / pip < TakipBaslat) return;
+      double yeni = NormalizeDouble(bid - TakipMesafe * pip, _Digits);
+      if(yeni > sl + _Point)
+         trade.PositionModify(tk, yeni, tp);
+     }
+   else
+     {
+      double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      if((acil - ask) / pip < TakipBaslat) return;
+      double yeni = NormalizeDouble(ask + TakipMesafe * pip, _Digits);
+      if(sl == 0 || yeni < sl - _Point)
+         trade.PositionModify(tk, yeni, tp);
+     }
+  }
+
+//+------------------------------------------------------------------+
 void OnTick()
   {
+   TakipEt();
    datetime t0 = iTime(_Symbol, PERIOD_H1, 0);
    if(t0 == 0 || t0 == sonBar)
       return;
