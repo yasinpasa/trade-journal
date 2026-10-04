@@ -1,0 +1,37 @@
+//@version=6
+// D kuralı (aday) — EURUSD H1: her iş günü Londra 12:00 mumunu SAT, 13:00'te kapat.
+// Mekanizma (hipotez): ECB fix'i (13:15 Londra) öncesinde dolar talebi EUR/USD'yi bastırır.
+// Python testi 2020-09 → 2025-09: 1.302 işlem, brüt +1,54 pip, t 5,15.
+// Stop yok (ölçüm için). Maliyet: 0,1 lot için ~0,7 pip = işlem başı ~0,70 $ (0,35 $ giriş + 0,35 $ çıkış).
+strategy("D Kurali - 12:00 Londra SAT", overlay = true,
+     initial_capital = 10000, currency = currency.USD,
+     default_qty_type = strategy.fixed, default_qty_value = 10000,
+     commission_type = strategy.commission.cash_per_order, commission_value = 0.35,
+     margin_long = 1, margin_short = 1)
+
+saat    = input.int(12, "Giriş saati (Londra)", minval = 0, maxval = 23, tooltip = "Plasebo için başka saat dene")
+yonSat  = input.bool(true, "Yön: SAT (kapalıysa AL)")
+basla   = input.time(timestamp("2020-09-21T00:00:00"), "Başlangıç")
+bitir   = input.time(timestamp("2030-01-01T00:00:00"), "Bitiş")
+
+if timeframe.period != "60"
+    runtime.error("Bu strateji H1 (60 dk) grafikte çalışır.")
+
+lonSaat  = hour(time, "Europe/London")
+haftaIci = dayofweek(time, "Europe/London") >= dayofweek.monday and dayofweek(time, "Europe/London") <= dayofweek.friday
+aralikta = time >= basla and time <= bitir
+
+// Emirler bir sonraki mumun açılışında dolar:
+// giriş saati−1 mumunda emir → giriş saati mumunun açılışında girer;
+// giriş saati mumunda kapat → bir sonraki mumun açılışında (≈ giriş mumunun kapanışı) çıkar.
+oncekiSaat = (saat + 23) % 24
+if aralikta and haftaIci and lonSaat == oncekiSaat and strategy.position_size == 0
+    if yonSat
+        strategy.entry("D", strategy.short)
+    else
+        strategy.entry("D", strategy.long)
+
+if lonSaat == saat and strategy.position_size != 0
+    strategy.close("D")
+
+bgcolor(lonSaat == saat and haftaIci ? color.new(color.orange, 85) : na, title = "D mumu")
